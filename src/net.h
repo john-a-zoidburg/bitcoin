@@ -714,6 +714,8 @@ public:
     std::atomic<NodeClock::time_point> m_last_recv{NodeClock::epoch};
     //! Unix epoch time at peer connection
     const NodeClock::time_point m_connected;
+    //! Soft, expiring eviction preference while an archival query is outstanding.
+    std::atomic<int64_t> m_blockcollector_protect_until_ms{0};
 
     //! Proxy to use regardless of global proxy settings if reconnecting to this node.
     const std::optional<Proxy> m_proxy_override;

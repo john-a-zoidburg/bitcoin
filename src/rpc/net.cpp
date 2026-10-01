@@ -1309,10 +1309,74 @@ static RPCMethod getrawaddrman()
     };
 }
 
+static RPCMethod getblockcollectorinfo()
+{
+    return RPCMethod{"getblockcollectorinfo",
+        "Return archival collector status. Stored responses require offline validation.\n"
+        "Requests, responses, notfound, timeouts, duplicates and dropped/ignored counts reset on restart.\n"
+        "Timeouts and later replies are separate events, so a request may increment both counters.\n"
+        "Responses count admitted payloads; files and bytes count completed or interrupted writes. Queue counts include in-progress writes.\n",
+        {},
+        RPCResult{RPCResult::Type::OBJ, "", "", {
+            {RPCResult::Type::BOOL, "enabled", "Whether archival requests are enabled"},
+            {RPCResult::Type::STR, "paused", "Reason requests are paused, or an empty string"},
+            {RPCResult::Type::NUM, "targets", "Unique target hashes"},
+            {RPCResult::Type::NUM, "peers", "Connected matching inbound peers"},
+            {RPCResult::Type::NUM, "pending", "Outstanding archival requests"},
+            {RPCResult::Type::NUM, "requests", "Requests in this process run"},
+            {RPCResult::Type::NUM, "responses", "Distinct matching payloads processed in this run (at most four per connection and target)"},
+            {RPCResult::Type::NUM, "notfound", "Explicit notfound responses"},
+            {RPCResult::Type::NUM, "timeouts", "Timed-out requests; not evidence of absence"},
+            {RPCResult::Type::NUM, "duplicates", "Byte-identical responses already archived"},
+            {RPCResult::Type::NUM, "files", "Raw archive file count, including previous runs and interrupted writes"},
+            {RPCResult::Type::NUM, "bytes", "Raw archive size, including previous runs and interrupted writes"},
+            {RPCResult::Type::NUM, "log_bytes", "Event log size, including previous runs and preserved incomplete logs"},
+            {RPCResult::Type::NUM, "survey_log_bytes", "Optional survey log bytes, including previous runs"},
+            {RPCResult::Type::NUM, "survey_log_limit", "Allowance for optional survey metadata; capture records share only the total log ceiling"},
+            {RPCResult::Type::NUM, "queue_items", "Queued and in-progress persistence jobs"},
+            {RPCResult::Type::NUM, "queue_bytes", "Memory reserved by queued and in-progress jobs"},
+            {RPCResult::Type::NUM, "suspended_peers", "Connections with repeated timeouts or insufficient retention allowance"},
+            {RPCResult::Type::NUM, "ignored_connections", "Disconnected matching peers that were never queried"},
+            {RPCResult::Type::NUM, "dropped_responses", "Payloads discarded due to admission limits or persistence failure"},
+            {RPCResult::Type::NUM, "dropped_events", "Optional survey metadata omitted due to queue or log allowances"},
+            {RPCResult::Type::NUM, "incomplete_captures", "Durable capture intents without final result records, including previous runs"},
+        }},
+        RPCExamples{HelpExampleCli("getblockcollectorinfo", "")},
+        [](const RPCMethod&, const JSONRPCRequest& request) -> UniValue {
+            const auto stats{EnsurePeerman(EnsureAnyNodeContext(request.context)).GetInfo().block_collector};
+            UniValue result{UniValue::VOBJ};
+            result.pushKV("enabled", stats.enabled);
+            result.pushKV("paused", stats.paused);
+            result.pushKV("targets", uint64_t{stats.targets});
+            result.pushKV("peers", uint64_t{stats.peers});
+            result.pushKV("pending", uint64_t{stats.pending});
+            result.pushKV("requests", stats.requests);
+            result.pushKV("responses", stats.responses);
+            result.pushKV("notfound", stats.notfound);
+            result.pushKV("timeouts", stats.timeouts);
+            result.pushKV("duplicates", stats.duplicates);
+            result.pushKV("files", stats.files);
+            result.pushKV("bytes", stats.bytes);
+            result.pushKV("log_bytes", stats.log_bytes);
+            result.pushKV("survey_log_bytes", stats.survey_log_bytes);
+            result.pushKV("survey_log_limit", stats.survey_log_limit);
+            result.pushKV("queue_items", uint64_t{stats.queue_items});
+            result.pushKV("queue_bytes", stats.queue_bytes);
+            result.pushKV("suspended_peers", uint64_t{stats.suspended_peers});
+            result.pushKV("ignored_connections", stats.ignored_connections);
+            result.pushKV("dropped_responses", stats.dropped_responses);
+            result.pushKV("dropped_events", stats.dropped_events);
+            result.pushKV("incomplete_captures", stats.incomplete_captures);
+            return result;
+        },
+    };
+}
+
 void RegisterNetRPCCommands(CRPCTable& t)
 {
     static const CRPCCommand commands[]{
         {"network", &getconnectioncount},
+        {"network", &getblockcollectorinfo},
         {"network", &ping},
         {"network", &getpeerinfo},
         {"network", &addnode},

@@ -8,6 +8,7 @@
 
 #include <consensus/amount.h>
 #include <net.h>
+#include <node/blockcollector.h>
 #include <node/txorphanage.h>
 #include <node/types.h>
 #include <private_broadcast.h>
@@ -85,6 +86,7 @@ struct PeerManagerInfo {
     unsigned int tx_send_rate{0};
     InvBucketInfo inbound_bucket;
     InvBucketInfo outbound_bucket;
+    node::BlockCollector::Stats block_collector;
 };
 
 class PeerManager : public CValidationInterface, public NetEventsInterface
@@ -110,6 +112,8 @@ public:
         bool private_broadcast{DEFAULT_PRIVATE_BROADCAST};
         //! Maximum per-second rate for sending transaction inventory to peers.
         unsigned int tx_send_rate{DEFAULT_TX_SEND_RATE};
+        //! Optional archival requests, separate from normal block downloads.
+        std::shared_ptr<node::BlockCollector> block_collector;
     };
 
     static std::unique_ptr<PeerManager> make(CConnman& connman, AddrMan& addrman,

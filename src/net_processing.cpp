@@ -1780,6 +1780,7 @@ void PeerManagerImpl::ReattemptPrivateBroadcast(CScheduler& scheduler)
 void PeerManagerImpl::FinalizeNode(const CNode& node)
 {
     NodeId nodeid = node.GetId();
+    if (m_opts.block_collector) m_opts.block_collector->RemovePeer(nodeid);
     {
     LOCK(cs_main);
     {
@@ -1966,6 +1967,7 @@ std::vector<node::TxOrphanage::OrphanInfo> PeerManagerImpl::GetOrphanTransaction
 
 PeerManagerInfo PeerManagerImpl::GetInfo() const
 {
+    const auto collector{m_opts.block_collector ? m_opts.block_collector->GetStats() : node::BlockCollector::Stats{}};
     LOCK(m_inv_to_send_mutex);
     return PeerManagerInfo{
         .median_outbound_time_offset = m_outbound_time_offsets.Median(),
@@ -1974,6 +1976,7 @@ PeerManagerInfo PeerManagerImpl::GetInfo() const
         .tx_send_rate = m_opts.tx_send_rate,
         .inbound_bucket = m_inbound_inv_bucket.info(),
         .outbound_bucket = m_outbound_inv_bucket.info(),
+        .block_collector = collector,
     };
 }
 
@@ -4152,6 +4155,11 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         }
 
         pfrom.fSuccessfullyConnected = true;
+        if (m_opts.block_collector) {
+            const auto subver{WITH_LOCK(pfrom.m_subver_mutex, return pfrom.cleanSubVer)};
+            m_opts.block_collector->AddPeer(pfrom.GetId(), pfrom.addr.ToStringAddrPort(), subver,
+                                             pfrom.IsInboundConn(), CanServeWitnesses(peer));
+        }
         return;
     }
 
@@ -5106,6 +5114,16 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
 
     if (msg_type == NetMsgType::BLOCK)
     {
+        if (m_opts.block_collector) {
+            const auto captured{m_opts.block_collector->ReceiveBlock(pfrom.GetId(), MakeUCharSpan(vRecv))};
+            pfrom.m_blockcollector_protect_until_ms = m_opts.block_collector->ProtectionDeadline(pfrom.GetId());
+            // Archival requests do not submit received data to chainstate or relay
+            // it. Preserve normal validation if normal sync also requested it.
+            if (captured && !WITH_LOCK(cs_main, {
+                    const auto range{mapBlocksInFlight.equal_range(*captured)};
+                    return std::any_of(range.first, range.second, [&](const auto& entry) { return entry.second.first == pfrom.GetId(); });
+                })) return;
+        }
         // Ignore block received while importing
         if (m_chainman.m_blockman.LoadingBlocks()) {
             LogDebug(BCLog::NET, "Unexpected block message received from peer %d\n", pfrom.GetId());
@@ -5348,6 +5366,10 @@ void PeerManagerImpl::ProcessMessage(Peer& peer, CNode& pfrom, const std::string
         vRecv >> vInv;
         std::vector<GenTxid> tx_invs;
         if (vInv.size() <= node::MAX_PEER_TX_ANNOUNCEMENTS + MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+            if (m_opts.block_collector) {
+                m_opts.block_collector->NotFound(pfrom.GetId(), vInv);
+                pfrom.m_blockcollector_protect_until_ms = m_opts.block_collector->ProtectionDeadline(pfrom.GetId());
+            }
             for (CInv &inv : vInv) {
                 if (inv.IsGenTxMsg()) {
                     tx_invs.emplace_back(ToGenTxid(inv));
@@ -6116,6 +6138,13 @@ bool PeerManagerImpl::SendMessages(CNode& node)
     MaybeSendAddr(node, peer, current_time);
 
     MaybeSendSendHeaders(node, peer);
+
+    if (m_opts.block_collector) {
+        if (const auto request{m_opts.block_collector->NextRequest(node.GetId(), SteadyClock::now(), !node.fPauseSend)}) {
+            MakeAndPushMessage(node, NetMsgType::GETDATA, std::vector<CInv>{*request});
+        }
+        node.m_blockcollector_protect_until_ms = m_opts.block_collector->ProtectionDeadline(node.GetId());
+    }
 
     ProcessInvBacklog(now);
 
