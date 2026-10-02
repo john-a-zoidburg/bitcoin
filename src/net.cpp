@@ -1697,6 +1697,8 @@ bool CConnman::AttemptToEvictConnection(bool evict_tx_relay_peer_only, std::opti
     AssertLockNotHeld(m_nodes_mutex);
 
     std::vector<NodeEvictionCandidate> vEvictionCandidates;
+    std::vector<NodeId> collector_protected;
+    const auto steady_now{std::chrono::duration_cast<std::chrono::milliseconds>(SteadyClock::now().time_since_epoch()).count()};
     {
 
         LOCK(m_nodes_mutex);
@@ -1726,9 +1728,20 @@ bool CConnman::AttemptToEvictConnection(bool evict_tx_relay_peer_only, std::opti
                 .m_conn_type = node->m_conn_type,
             };
             vEvictionCandidates.push_back(candidate);
+            if (node->m_blockcollector_protect_until_ms.load() > steady_now) collector_protected.push_back(node->GetId());
         }
     }
-    const std::optional<NodeId> node_id_to_evict = SelectNodeToEvict(std::move(vEvictionCandidates));
+    std::optional<NodeId> node_id_to_evict;
+    if (!collector_protected.empty()) {
+        auto without_collectors{vEvictionCandidates};
+        std::erase_if(without_collectors, [&](const auto& candidate) {
+            return std::find(collector_protected.begin(), collector_protected.end(), candidate.id) != collector_protected.end();
+        });
+        node_id_to_evict = SelectNodeToEvict(std::move(without_collectors));
+    }
+    // Recovery never removes the resource ceiling or normal diversity rules.
+    // Fall back to ordinary eviction if the preference leaves no candidate.
+    if (!node_id_to_evict) node_id_to_evict = SelectNodeToEvict(std::move(vEvictionCandidates));
     if (!node_id_to_evict) {
         return false;
     }

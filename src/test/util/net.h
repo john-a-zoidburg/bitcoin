@@ -94,6 +94,11 @@ struct ConnmanTestMsg : public CConnman {
         SocketHandler();
     }
 
+    bool AttemptToEvictConnectionPublic() EXCLUSIVE_LOCKS_REQUIRED(!m_nodes_mutex)
+    {
+        return AttemptToEvictConnection(/*evict_tx_relay_peer_only=*/false);
+    }
+
     void Handshake(CNode& node,
                    bool successfully_connected,
                    ServiceFlags remote_services,

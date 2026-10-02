@@ -116,6 +116,7 @@ const std::vector<std::string> RPC_COMMANDS_SAFE_FOR_FUZZING{
     "getbestblockhash",
     "getblock",
     "getblockchaininfo",
+    "getblockcollectorinfo",
     "getblockcount",
     "getblockfilter",
     "getblockfrompeer", // when no peers are connected, no p2p message is sent

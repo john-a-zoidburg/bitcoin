@@ -24,6 +24,10 @@ add_executable(test_bitcoin
   blockencodings_tests.cpp
   blockfilter_index_tests.cpp
   blockfilter_tests.cpp
+  blockcollector_tests.cpp
+  blockcollector_async_tests.cpp
+  blockcollector_review_tests.cpp
+  blockcollector_followup_tests.cpp
   blockmanager_tests.cpp
   blockpolicyestimator_tests.cpp
   bloom_tests.cpp
@@ -221,5 +225,11 @@ if(ENABLE_IPC)
 endif()
 
 add_all_test_targets()
+
+if(TARGET Python3::Interpreter)
+  add_test(NAME blockcollector_target_helper
+    COMMAND Python3::Interpreter -B ${PROJECT_SOURCE_DIR}/contrib/block-collector/test_make_targets.py
+  )
+endif()
 
 install_binary_component(test_bitcoin INTERNAL)

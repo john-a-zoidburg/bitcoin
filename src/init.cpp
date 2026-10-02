@@ -582,6 +582,21 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
                                                     DEFAULT_MAX_PEER_CONNECTIONS, MAX_OUTBOUND_FULL_RELAY_CONNECTIONS + MAX_BLOCK_RELAY_ONLY_CONNECTIONS + MAX_FEELER_CONNECTIONS, MAX_ADDNODE_CONNECTIONS, MAX_PRIVATE_BROADCAST_CONNECTIONS),
                    ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-inboundrelaypercent=<n>", strprintf("Permit a maximum percent of inbound connections to relay transactions, to limit memory utilization (0 to 100, default: %u).", DEFAULT_FULL_RELAY_INBOUND_PCT), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollector=<file>", "Opt in to archival block requests from matching inbound peers. File contains one block hash per line; relative paths use the network data directory and headers need not be known. Responses are preserved for offline validation, not submitted or relayed. Defaults to 500 connections and blocks-only mode unless overridden.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectordir=<dir>", "Private archive directory, relative to the network data directory unless absolute (default: block-archive). Contains raw .bin responses and peer-identifying events.jsonl.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectoragent=<text>", "Case-sensitive substring of the claimed user agent to survey (default: /btcd:). This is a selection hint, not authentication.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectorinterval=<ms>", "Minimum interval between requests to one peer, in milliseconds (default: 2000, range: 1..3600000).", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectorglobalinterval=<ms>", "Minimum interval between all collector requests, in milliseconds (default: 100, range: 1..3600000).", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectortimeout=<ms>", "Timeout for an archival request, in milliseconds (default: 30000, range: 1..3600000). Does not disconnect the peer.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectormaxpending=<n>", "Maximum archival requests outstanding across all peers (default: 16, range: 1..1024); at most one per peer.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectormaxbytes=<MiB>", "Maximum total raw archive size, including existing .bin and incomplete .tmp files (default: 1024, minimum: 4).", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectormaxfiles=<n>", "Maximum raw archive file count (default: 10000, range: 1..1000000).", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectorloglimit=<MiB>", "Maximum event log size, including existing records (default: 64). Optional survey metadata uses at most one quarter; capture records may use the remainder. Reaching the total storage limit pauses new archival requests.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectorqueue=<MiB>", "Maximum memory allowance for queued archive work, including outstanding response reservations (default: 64, minimum: 4).", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectorqueueitems=<n>", "Maximum queued/in-progress archive jobs, including response reservations (default: 4096, range: 2..65536).", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectormaxtimeouts=<n>", "Consecutive unanswered archival requests before suspending this connection's survey (default: 2). Late replies remain eligible for capture.", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectorpeerbytes=<MiB>", "Maximum retained/queued raw bytes from one connection (default: 0, deriving one quarter of the archive budget, at least one protocol payload).", ArgsManager::ALLOW_ANY | ArgsManager::DISALLOW_NEGATION | ArgsManager::DISALLOW_ELISION, OptionsCategory::CONNECTION);
+    argsman.AddArg("-blockcollectorrandomize", "Choose a random starting target per inbound connection to reduce survey bias (default: 1). Disable for reproducible tests.", ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-maxreceivebuffer=<n>", strprintf("Maximum per-connection receive buffer, <n>*1000 bytes (default: %u)", DEFAULT_MAXRECEIVEBUFFER), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-maxsendbuffer=<n>", strprintf("Maximum per-connection memory usage for the send buffer, <n>*1000 bytes (default: %u)", DEFAULT_MAXSENDBUFFER), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
     argsman.AddArg("-maxuploadtarget=<n>", strprintf("Tries to keep outbound traffic under the given target per 24h. Limit does not apply to peers with 'download' permission or blocks created within past week. 0 = no limit (default: %s). Optional suffix units [k|K|m|M|g|G|t|T] (default: M). Lowercase is 1000 base while uppercase is 1024 base", DEFAULT_MAX_UPLOAD_TARGET), ArgsManager::ALLOW_ANY, OptionsCategory::CONNECTION);
@@ -803,6 +818,11 @@ void InitParameterInteraction(ArgsManager& args)
     if (!args.GetArgs("-whitebind").empty()) {
         if (args.SoftSetBoolArg("-listen", true))
             LogInfo("parameter interaction: -whitebind set -> setting -listen=1\n");
+    }
+
+    if (args.IsArgSet("-blockcollector") && !args.IsArgNegated("-blockcollector")) {
+        args.SoftSetArg("-maxconnections", "500");
+        args.SoftSetBoolArg("-blocksonly", true);
     }
 
     if (!args.GetArgs("-connect").empty() || args.IsArgNegated("-connect") || args.GetIntArg("-maxconnections", DEFAULT_MAX_PEER_CONNECTIONS) <= 0) {
@@ -1053,6 +1073,9 @@ bool AppInitParameterInteraction(const ArgsManager& args)
     // if listen=0, then disallow listenonion=1
     if (!args.GetBoolArg("-listen", DEFAULT_LISTEN) && args.GetBoolArg("-listenonion", DEFAULT_LISTEN_ONION)) {
         return InitError(Untranslated("Cannot set -listen=0 together with -listenonion=1"));
+    }
+    if (args.IsArgSet("-blockcollector") && !args.IsArgNegated("-blockcollector") && !args.GetBoolArg("-listen", DEFAULT_LISTEN)) {
+        LogWarning("Block collector only surveys inbound peers; -listen=0 prevents collection.\n");
     }
 
     // Make sure enough file descriptors are available. We need to reserve enough FDs to account for the bare minimum,
@@ -1647,7 +1670,11 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     fDiscover = args.GetBoolArg("-discover", true);
 
     PeerManager::Options peerman_opts{};
-    ApplyArgsManOptions(args, peerman_opts);
+    try {
+        ApplyArgsManOptions(args, peerman_opts);
+    } catch (const std::exception& error) {
+        return InitError(Untranslated(strprintf("Cannot initialize peer manager: %s", error.what())));
+    }
 
     {
         // Read asmap file if configured or embedded asmap data and initialize
